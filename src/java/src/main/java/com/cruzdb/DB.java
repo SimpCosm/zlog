@@ -56,6 +56,13 @@ public class DB extends ZObject {
   /**
    *
    */
+  public String getStats() throws LogException {
+    return getStats(nativeHandle_);
+  }
+
+  /**
+   *
+   */
   public CruzIterator newIterator() {
     return new CruzIterator(this, iterator(nativeHandle_));
   }
@@ -77,6 +84,7 @@ public class DB extends ZObject {
       int keyLength) throws LogException;
   private native void delete(long handle, byte[] key, int keyOffset,
       int keyLength) throws LogException;
+  private native String getStats(long handle) throws LogException;
   private native long iterator(long handle);
   private native long transaction(long handle);
 }

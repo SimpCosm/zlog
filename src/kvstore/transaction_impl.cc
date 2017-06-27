@@ -390,6 +390,8 @@ void TransactionImpl::Put(const Slice& key, const Slice& value)
   assert(!committed_);
   assert(!aborted_);
 
+  count_put++;
+
   TraceApplier ta(this);
 
   /*
@@ -441,6 +443,8 @@ void TransactionImpl::Delete(const Slice& key)
 {
   assert(!committed_);
   assert(!aborted_);
+
+  count_del++;
 
   TraceApplier ta(this);
 
@@ -534,6 +538,8 @@ int TransactionImpl::Get(const Slice& key, std::string* val)
 {
   assert(!committed_);
   assert(!aborted_);
+
+  count_get++;
 
   TraceApplier ta(this);
 

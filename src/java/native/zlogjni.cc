@@ -149,6 +149,13 @@ jbyteArray Java_com_cruzdb_DB_get__J_3BII
   return jret_value;
 }
 
+jstring Java_com_cruzdb_DB_getStats(JNIEnv *env, jobject jdb, jlong jdbHandle)
+{
+  auto *db = reinterpret_cast<DB*>(jdbHandle);
+  auto stats = db->GetStats();
+  return env->NewStringUTF(stats.c_str());
+}
+
 void Java_com_cruzdb_DB_delete(JNIEnv *env, jobject jdb, jlong jdbHandle,
     jbyteArray jkey, jint jkeyOffset, jint jkeyLength)
 {

@@ -55,6 +55,11 @@ class DB {
   virtual void write_dot_history(std::ostream& out,
       std::vector<Snapshot*>& snapshots) = 0;
   virtual void validate() = 0;
+
+  /*
+   * Retrieve DB stats in JSON format.
+   */
+  virtual std::string GetStats() = 0;
 };
 
 #endif

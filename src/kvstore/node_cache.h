@@ -9,6 +9,8 @@
 #include <condition_variable>
 #include "node.h"
 #include "kvstore/kvstore.pb.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
 
 class DBImpl;
 
@@ -70,6 +72,8 @@ class NodeCache {
     }
   }
 
+  void SaveStats(rapidjson::Writer<rapidjson::StringBuffer>& w);
+
  private:
   DBImpl *db_;
   std::mutex lock_;
@@ -83,6 +87,13 @@ class NodeCache {
   };
 
   struct shard {
+    shard() :
+      num_hits(0),
+      num_misses(0)
+    {}
+
+    unsigned num_hits;
+    unsigned num_misses;
     std::mutex lock;
     std::unordered_map<std::pair<uint64_t, int>, entry, pair_hash> nodes;
     std::list<std::pair<uint64_t, int>> lru;

@@ -14,6 +14,9 @@ class DBImpl;
 class TransactionImpl : public Transaction {
  public:
   TransactionImpl(DBImpl *db, NodePtr root, int64_t rid) :
+    count_put(0),
+    count_get(0),
+    count_del(0),
     db_(db),
     src_root_(root),
     root_(nullptr),
@@ -59,6 +62,10 @@ class TransactionImpl : public Transaction {
   void SerializeAfterImage(kvstore_proto::Intention& i,
       std::vector<SharedNodeRef>& delta);
   void SetDeltaPosition(std::vector<SharedNodeRef>& delta, uint64_t pos);
+
+  unsigned count_put;
+  unsigned count_get;
+  unsigned count_del;
 
  private:
   class TraceApplier {

@@ -2,6 +2,8 @@ include_directories(${CMAKE_BINARY_DIR}/src)
 include_directories(${CMAKE_SOURCE_DIR}/src)
 include_directories(${CMAKE_SOURCE_DIR}/src/include)
 
+include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/rapidjson/include")
+
 add_subdirectory(proto)
 add_subdirectory(libseq)
 add_subdirectory(libzlog)
@@ -18,7 +20,6 @@ else()
   message(STATUS "JNI library is disabled")
 endif(WITH_JNI)
 
-include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/rapidjson/include")
 add_subdirectory(tools)
 
 ################################################################################

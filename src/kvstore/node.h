@@ -84,6 +84,13 @@ class NodePtr {
       if (auto ret = ref_.lock()) {
         return ret;
       } else {
+        /*
+         * TODO: this is not thread-safe, but the race is tight, and since
+         * all data in the tree is immutable, this may not even show up as
+         * anything other than a memory leak. In any case, removing the race
+         * condition is a core component of memory management version 2.0 (see
+         * GitHub issue tracker).
+         */
         ref_ = fetch(trace);
       }
     }

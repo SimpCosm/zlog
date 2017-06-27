@@ -1,7 +1,12 @@
 #include "db_impl.h"
 #include <sstream>
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
 
 DBImpl::DBImpl(zlog::Log *log) :
+  count_put_(0),
+  count_get_(0),
+  count_del_(0),
   log_(log),
   cache_(this),
   stop_(false),
@@ -379,6 +384,13 @@ void DBImpl::TransactionFinisher()
   }
 }
 
+void DBImpl::SaveTransactionStats(TransactionImpl *txn)
+{
+  count_put_ += txn->count_put;
+  count_get_ += txn->count_get;
+  count_del_ += txn->count_del;
+}
+
 void DBImpl::AbortTransaction(TransactionImpl *txn)
 {
   assert(txn == cur_txn_);
@@ -386,6 +398,7 @@ void DBImpl::AbortTransaction(TransactionImpl *txn)
   assert(!txn->Completed());
 
   lock_.lock();
+  SaveTransactionStats(txn);
   cur_txn_ = nullptr;
   lock_.unlock();
 
@@ -403,9 +416,30 @@ void DBImpl::CompleteTransaction(TransactionImpl *txn)
   // variable in the txn finisher thread. otherwise there is a race that will
   // cause the finisher to miss the state change and wakeup.
   lock_.lock();
+  SaveTransactionStats(txn);
   cur_txn_->MarkCommitted();
   lock_.unlock();
 
   // notify txn finisher
   txn_finisher_cond_.notify_one();
+}
+
+std::string DBImpl::GetStats()
+{
+  rapidjson::StringBuffer s;
+  rapidjson::Writer<rapidjson::StringBuffer> w(s);
+
+  w.StartObject();
+  w.Key("txn_puts");
+  w.Uint(count_put_);
+  w.Key("txn_gets");
+  w.Uint(count_get_);
+  w.Key("txn_dels");
+  w.Uint(count_del_);
+
+  cache_.SaveStats(w);
+
+  w.EndObject();
+
+  return s.GetString();
 }

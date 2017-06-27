@@ -3,6 +3,8 @@
 #include <time.h>
 #include <deque>
 #include <condition_variable>
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
 
 // TODO: if usage goes above high marker block new txns
 static const size_t low_marker  =  4*1024*1024;
@@ -72,6 +74,27 @@ void NodeCache::do_vaccum_()
   }
 }
 
+void NodeCache::SaveStats(rapidjson::Writer<rapidjson::StringBuffer>& w)
+{
+  unsigned cache_hits = 0;
+  unsigned cache_misses = 0;
+
+  for (size_t slot = 0; slot < num_slots_; slot++) {
+    auto& shard = shards_[slot];
+
+    std::unique_lock<std::mutex> lk(shard->lock);
+
+    cache_hits += shard->num_hits;
+    cache_misses += shard->num_misses;
+  }
+
+  w.Key("cache_hits");
+  w.Uint(cache_hits);
+
+  w.Key("cache_misses");
+  w.Uint(cache_misses);
+}
+
 // when resolving a node we only resolve the single node. figuring out when to
 // resolve an entire intention would be interesting.
 SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
@@ -93,8 +116,11 @@ SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
     nodes_lru_.erase(e.lru_iter);
     nodes_lru_.emplace_front(key);
     e.lru_iter = nodes_lru_.begin();
+    shard->num_hits++;
     return e.node;
   }
+
+  shard->num_misses++;
 
   // release lock for I/O
   lk.unlock();

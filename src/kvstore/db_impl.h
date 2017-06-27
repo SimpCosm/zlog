@@ -50,6 +50,8 @@ class DBImpl : public DB {
 
   int RestoreFromLog();
 
+  std::string GetStats() override;
+
  private:
   friend class TransactionImpl;
   friend class NodeCache;
@@ -81,6 +83,11 @@ class DBImpl : public DB {
   void AbortTransaction(TransactionImpl *txn);
 
  private:
+
+  unsigned count_put_;
+  unsigned count_get_;
+  unsigned count_del_;
+  void SaveTransactionStats(TransactionImpl *txn);
 
   SharedNodeRef fetch(std::vector<std::pair<int64_t, int>>& trace,
       int64_t csn, int offset) {
