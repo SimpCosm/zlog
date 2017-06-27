@@ -48,7 +48,7 @@ SharedNodeRef TransactionImpl::insert_recursive(std::deque<SharedNodeRef>& path,
 
   if (node == Node::Nil()) {
     auto nn = std::make_shared<Node>(key, value, true, Node::Nil(),
-        Node::Nil(), rid_, false, db_);
+        Node::Nil(), rid_, false, db_, true);
     path.push_back(nn);
     fresh_nodes_.push_back(nn);
     return nn;

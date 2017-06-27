@@ -45,6 +45,10 @@ void NodeCache::do_vaccum_()
         nodes_lru_.erase(e.lru_iter);
         nodes_lru_.emplace_front(key);
         e.lru_iter = nodes_lru_.begin();
+        if (!e.node->touched()) {
+          e.node->touch();
+          shard->num_touched++;
+        }
       }
     }
 
@@ -63,6 +67,9 @@ void NodeCache::do_vaccum_()
             break;
           auto key = nodes_lru_.back();
           auto nit = nodes_.find(key);
+          if (nit->second.node->touched()) {
+            shard->num_touched--;
+          }
           assert(nit != nodes_.end());
           used_bytes_ -= nit->second.node->ByteSize();
           left -= nit->second.node->ByteSize();
@@ -78,6 +85,8 @@ void NodeCache::SaveStats(rapidjson::Writer<rapidjson::StringBuffer>& w)
 {
   unsigned cache_hits = 0;
   unsigned cache_misses = 0;
+  unsigned total_count = 0;
+  unsigned num_touched = 0;
 
   for (size_t slot = 0; slot < num_slots_; slot++) {
     auto& shard = shards_[slot];
@@ -86,6 +95,8 @@ void NodeCache::SaveStats(rapidjson::Writer<rapidjson::StringBuffer>& w)
 
     cache_hits += shard->num_hits;
     cache_misses += shard->num_misses;
+    total_count += shard->nodes.size();
+    num_touched += shard->num_touched;
   }
 
   w.Key("cache_hits");
@@ -93,10 +104,26 @@ void NodeCache::SaveStats(rapidjson::Writer<rapidjson::StringBuffer>& w)
 
   w.Key("cache_misses");
   w.Uint(cache_misses);
+
+  w.Key("total_count");
+  w.Uint(total_count);
+
+  w.Key("num_touched");
+  w.Uint(num_touched);
 }
 
-// when resolving a node we only resolve the single node. figuring out when to
-// resolve an entire intention would be interesting.
+/*
+ * Resolve a node pointer.
+ *
+ * 1. if the target node is found in the cache, return it.
+ * 2. otherwise, read the intention containing the node from the log.
+ * 3. update node cache from intention (check for duplicates)
+ * 4. return target node
+ *
+ * cache update policy: the lru order for the target node (cached or not), and
+ * non-target nodes not found in the cache are updated. the lru order for
+ * non-target nodes found in the cache is not updated.
+ */
 SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
     int64_t csn, int offset)
 {
@@ -107,23 +134,26 @@ SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
   auto& nodes_ = shard->nodes;
   auto& nodes_lru_ = shard->lru;
 
-  std::unique_lock<std::mutex> lk(shard->lock);
+  {
+    std::unique_lock<std::mutex> lk(shard->lock);
 
-  // is the node in the cache?
-  auto it = nodes_.find(key);
-  if (it != nodes_.end()) {
-    entry& e = it->second;
-    nodes_lru_.erase(e.lru_iter);
-    nodes_lru_.emplace_front(key);
-    e.lru_iter = nodes_lru_.begin();
-    shard->num_hits++;
-    return e.node;
+    // is the node in the cache?
+    auto it = nodes_.find(key);
+    if (it != nodes_.end()) {
+      entry& e = it->second;
+      nodes_lru_.erase(e.lru_iter);
+      nodes_lru_.emplace_front(key);
+      e.lru_iter = nodes_lru_.begin();
+      shard->num_hits++;
+      if (!e.node->touched()) {
+        e.node->touch();
+        shard->num_touched++;
+      }
+      return e.node;
+    }
+
+    shard->num_misses++;
   }
-
-  shard->num_misses++;
-
-  // release lock for I/O
-  lk.unlock();
 
   // publish the lru traces. we are doing this here because if the log read
   // blocks or takes a long time we don't want to reduce the quality of the
@@ -146,31 +176,59 @@ SharedNodeRef NodeCache::fetch(std::vector<std::pair<int64_t, int>>& trace,
   assert(i.ParseFromString(snapshot));
   assert(i.IsInitialized());
 
-  auto nn = deserialize_node(i, csn, offset);
-  assert(nn->read_only());
+  SharedNodeRef target = nullptr;
+  for (int idx = 0; idx < i.tree_size(); idx++) {
+    auto nn = deserialize_node(i, csn, idx);
+    assert(nn->read_only());
 
-  // add to cache. make sure it didn't show up after we released the lock to
-  // read the node from the log.
-  lk.lock();
+    auto key = std::make_pair(csn, idx);
 
-  it = nodes_.find(key);
-  if (it != nodes_.end()) {
-    entry& e = it->second;
-    nodes_lru_.erase(e.lru_iter);
-    nodes_lru_.emplace_front(key);
-    e.lru_iter = nodes_lru_.begin();
-    return e.node;
+    auto slot = pair_hash()(key) % num_slots_;
+    auto& shard = shards_[slot];
+    auto& nodes_ = shard->nodes;
+    auto& nodes_lru_ = shard->lru;
+
+    std::unique_lock<std::mutex> lk(shard->lock);
+
+    auto it = nodes_.find(key);
+
+    if (idx == offset) {
+      if (it == nodes_.end()) {
+        nn->touch();
+        shard->num_touched++;
+        target = nn;
+
+        used_bytes_ += nn->ByteSize();
+        nodes_lru_.emplace_front(key);
+        auto iter = nodes_lru_.begin();
+        auto res = nodes_.insert(
+            std::make_pair(key, entry{nn, iter}));
+        assert(res.second);
+      } else {
+        entry& e = it->second;
+        nodes_lru_.erase(e.lru_iter);
+        nodes_lru_.emplace_front(key);
+        e.lru_iter = nodes_lru_.begin();
+        if (!e.node->touched()) {
+          e.node->touch();
+          shard->num_touched++;
+        }
+        target = e.node;
+      }
+    } else {
+      if (it == nodes_.end()) {
+        used_bytes_ += nn->ByteSize();
+        nodes_lru_.emplace_front(key);
+        auto iter = nodes_lru_.begin();
+        auto res = nodes_.insert(
+            std::make_pair(key, entry{nn, iter}));
+        assert(res.second);
+      }
+    }
   }
 
-  nodes_lru_.emplace_front(key);
-  auto iter = nodes_lru_.begin();
-  auto res = nodes_.insert(
-      std::make_pair(key, entry{nn, iter}));
-  assert(res.second);
-
-  used_bytes_ += nn->ByteSize();
-
-  return nn;
+  assert(target != nullptr);
+  return target;
 }
 
 // disabling resolution during node deserialization because currently when
@@ -265,7 +323,7 @@ SharedNodeRef NodeCache::deserialize_node(const kvstore_proto::Intention& i,
   //
   // TODO: initialize so it can be read-only after creation
   auto nn = std::make_shared<Node>(n.key(), n.val(), n.red(),
-      nullptr, nullptr, pos, false, db_);
+      nullptr, nullptr, pos, false, db_, false);
 
   // the left and right pointers are undefined. make sure to handle the case
   // correctly in which a child is nil vs defined on storage but not resolved
@@ -328,6 +386,8 @@ NodePtr NodeCache::ApplyAfterImageDelta(
         std::make_pair(key, entry{nn, iter}));
     assert(res.second);
     offset++;
+
+    shard->num_touched++;
 
     used_bytes_ += nn->ByteSize();
   }

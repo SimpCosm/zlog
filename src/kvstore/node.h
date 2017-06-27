@@ -151,15 +151,15 @@ class Node {
 
   // TODO: allow rid to have negative initialization value
   Node(const Slice& key, const Slice& val, bool red, SharedNodeRef lr, SharedNodeRef rr,
-      uint64_t rid, bool read_only, DBImpl *db) :
+      uint64_t rid, bool read_only, DBImpl *db, bool touched) :
     left(lr, db, read_only), right(rr, db, read_only),
     key_(key.data(), key.size()), val_(val.data(), val.size()),
-    red_(red), rid_(rid), read_only_(read_only)
+    red_(red), rid_(rid), read_only_(read_only), touched_(touched)
   {}
 
   static SharedNodeRef& Nil() {
     static SharedNodeRef node = std::make_shared<Node>("", "",
-        false, nullptr, nullptr, (uint64_t)-1, true, nullptr);
+        false, nullptr, nullptr, (uint64_t)-1, true, nullptr, true);
     return node;
   }
 
@@ -167,10 +167,11 @@ class Node {
     if (src == Nil())
       return Nil();
 
+    // TODO: we don't really need to resolve both child pointers here.
     // TODO: we don't need to use the version of ref() that resolves here
     // because the caller will likely only traverse down one side.
     auto node = std::make_shared<Node>(src->key(), src->val(), src->red(),
-        src->left.ref_notrace(), src->right.ref_notrace(), rid, false, db);
+        src->left.ref_notrace(), src->right.ref_notrace(), rid, false, db, true);
 
     node->left.set_csn(src->left.csn());
     node->left.set_offset(src->left.offset());
@@ -239,12 +240,21 @@ class Node {
     return sizeof(*this) + key_.size() + val_.size();
   }
 
+  inline void touch() {
+    touched_ = true;
+  }
+
+  inline bool touched() const {
+    return touched_;
+  }
+
  private:
   std::string key_;
   std::string val_;
   bool red_;
   int64_t rid_;
   bool read_only_;
+  bool touched_;
 };
 
 #endif

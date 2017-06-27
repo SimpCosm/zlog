@@ -89,11 +89,14 @@ class NodeCache {
   struct shard {
     shard() :
       num_hits(0),
-      num_misses(0)
+      num_misses(0),
+      num_touched(0)
     {}
 
     unsigned num_hits;
     unsigned num_misses;
+    unsigned num_touched;
+
     std::mutex lock;
     std::unordered_map<std::pair<uint64_t, int>, entry, pair_hash> nodes;
     std::list<std::pair<uint64_t, int>> lru;
